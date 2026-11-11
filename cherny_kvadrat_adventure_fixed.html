@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#080e1c">
+<title>Чёрный квадрат — Большое приключение</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080e1c;color:#fff;font-family:system-ui,Arial}
+#gameWrap{position:relative;width:100vw;height:100dvh;overflow:hidden;background:#0b1427}
+canvas{display:block;width:100%;height:100%;object-fit:contain;touch-action:none}
+#hud{position:absolute;top:10px;left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;font-weight:800;text-shadow:0 2px 5px #000}
+.badge{background:#101b30dd;border:1px solid #9bdfff55;border-radius:13px;padding:7px 11px;font-size:clamp(11px,2vw,16px);backdrop-filter:blur(7px)}
+#leftHud{display:flex;gap:7px;flex-wrap:wrap}#rightHud{display:flex;gap:7px}
+#overlay{position:absolute;inset:0;display:grid;place-items:center;background:#030816a8;padding:16px}
+.panel{width:min(570px,94vw);max-height:90%;overflow:auto;background:linear-gradient(145deg,#142744f5,#101326f5);border:1px solid #8ceaff88;border-radius:23px;padding:23px;text-align:center;box-shadow:0 15px 70px #000a,0 0 35px #38cfff22}
+.panel h1{font-size:clamp(25px,5vw,43px);margin:0 0 8px;color:#bff4ff;text-shadow:0 0 18px #49cfff77}
+.panel p{line-height:1.5;color:#dce9ff;margin:10px 0 17px}
+button{border:0;border-radius:14px;padding:12px 19px;font-weight:900;font-size:16px;color:#06101c;background:linear-gradient(135deg,#a0f4ff,#9aaaff);box-shadow:0 5px 0 #526a9c;touch-action:none}
+#controls{position:absolute;left:0;right:0;bottom:13px;display:flex;justify-content:space-between;padding:0 14px;pointer-events:none}
+.group{display:flex;gap:10px;align-items:end}.control{pointer-events:auto;width:58px;height:58px;border-radius:18px;background:#142744cc;border:1px solid #b5eaff99;color:#fff;box-shadow:0 5px 0 #070e1c99;font-size:23px;backdrop-filter:blur(5px)}
+#action{font-size:13px;width:68px}
+#toast{position:absolute;top:66px;left:50%;transform:translateX(-50%);padding:9px 14px;border-radius:12px;background:#111d33eF;border:1px solid #9eeaff88;color:#e9fbff;font-weight:800;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+@media(orientation:portrait){#gameWrap:after{content:"ПОВЕРНИ ТЕЛЕФОН ГОРИЗОНТАЛЬНО ↻";position:absolute;z-index:10;inset:0;display:grid;place-items:center;text-align:center;background:#070d1bf5;color:#e5f8ff;font-size:21px;font-weight:900;padding:30px}}
+@media(orientation:landscape){#gameWrap:after{display:none}}
+</style>
+</head>
+<body><div id="gameWrap">
+<canvas id="c" width="960" height="540"></canvas>
+<div id="hud"><div id="leftHud"><div class="badge" id="levelName">ГЛАВА 1</div><div class="badge" id="stars">✦ 0/8</div></div><div id="rightHud"><div class="badge" id="health">♥ ♥ ♥</div><div class="badge" id="parts">⚙ 0/1</div></div></div>
+<div id="toast"></div>
+<div id="controls"><div class="group"><button class="control" id="L">◀</button><button class="control" id="R">▶</button></div><div class="group"><button class="control" id="A">ДЕЙСТВИЕ</button><button class="control" id="J">▲</button></div></div>
+<div id="overlay"><div class="panel" id="panel"><h1>ЧЁРНЫЙ КВАДРАТ</h1><p><b>Большое приключение</b><br>Прыгай на круглых врагов, толкай ящики, нажимай кнопки, собирай звёзды и ищи скрытые комнаты. В конце уровня тебя ждёт босс.</p><p>На телефоне играй горизонтально. ◀ ▶ — движение, ▲ — прыжок, «ДЕЙСТВИЕ» — ремонт и взаимодействие. На компьютере: A/D или стрелки, Space — прыжок, E — действие.</p><button id="start">НАЧАТЬ ИГРУ</button></div></div>
+</div>
+<script>
+(()=>{
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),W=960,H=540;
+const $=id=>document.getElementById(id);
+let keys={l:false,r:false,j:false,a:false},started=false,paused=false,frame=0,camera=0,level=0,starsGot=0,lives=3,repair=0,toastTimer=0,shake=0;
+const G=0.58;
+const maps=[
+ {name:'ЗАРОСШИЕ РУИНЫ',length:2500,sky:['#142b46','#4a7180'],spawn:[55,380],
+  platforms:[[0,475,430,65],[480,430,190,25],[730,375,190,25],[980,455,260,25],[1320,400,180,25],[1570,350,210,25],[1870,445,190,25],[2180,475,320,65],[1100,330,115,18]],
+  stars:[[230,420],[540,375],[790,320],[1050,405],[1390,345],[1635,295],[1940,390],[2250,420]],
+  enemies:[{x:350,y:445,type:'walker'},{x:820,y:345,type:'walker'},{x:1150,y:425,type:'chaser'},{x:1650,y:320,type:'shooter'},{x:1990,y:415,type:'walker'}],
+  crates:[[600,390],[1030,415]],button:{x:1170,y:420,w:35,h:35},bridge:[1250,430,90,18],moving:{x:1750,y:385,w:105,h:17,axis:'y',range:65,speed:1.2},
+  secret:{x:1450,y:335},boss:{x:2350,y:420,hp:5}},
+ {name:'НЕОНОВЫЙ КАНЬОН',length:2750,sky:['#1b1741','#683d75'],spawn:[45,370],
+  platforms:[[0,465,300,75],[360,410,180,25],[620,350,170,25],[870,425,220,25],[1190,365,190,25],[1480,315,180,25],[1760,410,210,25],[2070,350,180,25],[2380,465,370,75]],
+  stars:[[410,355],[680,295],[930,370],[1250,310],[1535,260],[1820,355],[2110,295],[2450,410]],
+  enemies:[{x:220,y:435,type:'walker'},{x:700,y:320,type:'chaser'},{x:1000,y:395,type:'walker'},{x:1350,y:335,type:'shooter'},{x:1850,y:380,type:'chaser'},{x:2150,y:320,type:'walker'}],
+  crates:[[930,375],[1230,315]],button:{x:1320,y:330,w:35,h:35},bridge:[1400,365,95,18],moving:{x:1950,y:370,w:110,h:17,axis:'x',range:75,speed:1.5},
+  secret:{x:1640,y:290},boss:{x:2600,y:420,hp:7}}
+];
+let p={},plats=[],crates=[],foes=[],orbs=[],shots=[],particles=[],boss={},buttonOn=false,bridgeOn=false,mover={},secret={},exit={};
+function say(t){$('toast').textContent=t;$('toast').style.opacity=1;toastTimer=110}
+function hud(){$('levelName').textContent=`${level+1}. ${maps[level].name}`;$('stars').textContent=`✦ ${starsGot}/${maps[level].stars.length}`;$('health').textContent='♥ '.repeat(Math.max(0,lives)).trim()||'♡';$('parts').textContent=`⚙ ${secret.fixed?1:0}/1`}
+function loadLevel(){let m=maps[level];plats=m.platforms.map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],kind:'solid'}));crates=m.crates.map(a=>({x:a[0],y:a[1],w:42,h:42,vx:0,vy:0,broken:false}));foes=m.enemies.map(e=>({...e,home:e.x,dir:1,alive:true,hp:e.type==='shooter'?2:1,cool:80}));orbs=m.stars.map(a=>({x:a[0],y:a[1],got:false}));shots=[];particles=[];p={x:m.spawn[0],y:m.spawn[1],w:34,h:34,vx:0,vy:0,ground:false,rot:0,inv:0,face:1};buttonOn=false;bridgeOn=false;mover={...m.moving,baseX:m.moving.x,baseY:m.moving.y};secret={...m.secret,found:false,fixed:false,progress:0};boss={x:m.boss.x,y:m.boss.y,w:76,h:76,hp:m.boss.hp,max:m.boss.hp,dir:-1,phase:1,cool:100,active:false,dead:false};exit={x:m.length-55};camera=0;starsGot=0;repair=0;hud();draw()}
+function particlesAt(x,y,color,n=14){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-.5)*6,vy:(Math.random()-.8)*6,life:35,color,size:2+Math.random()*4})}
+function overlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function solids(){return bridgeOn?[...plats,{x:maps[level].bridge[0],y:maps[level].bridge[1],w:maps[level].bridge[2],h:maps[level].bridge[3],kind:'bridge'}]:plats}
+function hurt(){if(p.inv>0)return;lives--;p.inv=95;p.vy=-7;p.vx=-p.face*4;p.x=Math.max(0,p.x-35);shake=12;particlesAt(p.x+17,p.y+17,'#ff6687',20);hud();if(lives<=0)endPanel('ПОПРОБУЙ ЕЩЁ РАЗ','Квадратик ещё может спасти мир.',$('start').textContent='ИГРАТЬ СНОВА')}
+function endPanel(title,desc,label){started=false;$('overlay').style.display='grid';$('panel').innerHTML=`<h1>${title}</h1><p>${desc}</p><button id="again">${label}</button>`;$('again').onclick=()=>{level=0;lives=3;loadLevel();$('overlay').style.display='none';started=true;loop()}}
+function update(){
+ frame++;
+ let m=maps[level],dir=(keys.r?1:0)-(keys.l?1:0);
+ if(dir){p.vx+=dir*.62;p.face=dir}else p.vx*=p.ground?.78:.985;
+ p.vx=Math.max(-5.2,Math.min(5.2,p.vx));
+ if(keys.j&&p.ground){p.vy=-12.2;p.ground=false;particlesAt(p.x+17,p.y+34,'#9defff',7)}
+ p.vy=Math.min(13,p.vy+G);
+ // crates are pushable blocks
+ for(let b of crates)if(!b.broken){b.vy=Math.min(10,b.vy+.5);b.x+=b.vx;b.vx*=.8;b.y+=b.vy;for(let s of solids())if(overlap(b,s)){if(b.vy>0){b.y=s.y-b.h;b.vy=0}else{b.y=s.y+s.h;b.vy=0}}}
+ // moving platform
+ mover.x=mover.baseX+(mover.axis==='x'?Math.sin(frame*mover.speed/65)*mover.range:0);
+ mover.y=mover.baseY+(mover.axis==='y'?Math.sin(frame*mover.speed/65)*mover.range:0);
+ p.x+=p.vx;
+ for(let s of [...solids(),...crates.filter(b=>!b.broken)])if(overlap(p,s)){if(p.vx>0){p.x=s.x-p.w;if(crates.includes(s)){s.vx=2.5}}else if(p.vx<0){p.x=s.x+s.w;if(crates.includes(s)){s.vx=-2.5}}}
+ p.y+=p.vy;p.ground=false;
+ let all=[...solids(),mover,...crates.filter(b=>!b.broken)];
+ for(let s of all)if(overlap(p,s)){if(p.vy>0){p.y=s.y-p.h;p.vy=0;p.ground=true}else if(p.vy<0){p.y=s.y+s.h;p.vy=0}}
+ if(p.ground&&Math.abs(p.vx)>.15)p.rot+=p.vx*.035;
+ if(p.y>650)hurt();
+ // collect stars
+ for(let o of orbs)if(!o.got&&Math.hypot(p.x+17-o.x,p.y+17-o.y)<29){o.got=true;starsGot++;particlesAt(o.x,o.y,'#ffe78a',18);hud()}
+ // enemy AI
+ for(let e of foes)if(e.alive){
+  if(e.type==='chaser'&&Math.abs(p.x-e.x)<240)e.dir=p.x<e.x?-1:1;
+  e.x+=e.dir*(e.type==='chaser'?1.65:1.05);if(Math.abs(e.x-e.home)>85)e.dir*=-1;
+  if(e.type==='shooter'){e.cool--;if(e.cool<=0&&Math.abs(p.x-e.x)<440){shots.push({x:e.x+15,y:e.y+12,vx:p.x<e.x?-3.2:3.2,life:130});e.cool=115}}
+  let box={x:e.x,y:e.y,w:34,h:31};
+  if(overlap(p,box)){if(p.vy>1&&p.y+p.h<e.y+20){e.hp--;p.vy=-9;particlesAt(e.x+17,e.y+12,'#ff8ca8',15);if(e.hp<=0)e.alive=false}else hurt()}
+ }
+ for(let s of shots){s.x+=s.vx;s.life--;if(overlap(p,{x:s.x,y:s.y,w:13,h:9})&&p.inv<=0){s.life=0;hurt()}}
+ shots=shots.filter(s=>s.life>0&&s.x>camera-100&&s.x<camera+1100);
+ // button opens bridge
+ if(overlap(p,{x:m.button.x,y:m.button.y-10,w:m.button.w,h:m.button.h+10})||crates.some(b=>!b.broken&&overlap(b,{x:m.button.x,y:m.button.y-12,w:m.button.w,h:45}))){if(!buttonOn){buttonOn=true;bridgeOn=true;say('Переключатель активирован! Мост появился.');particlesAt(m.button.x,m.button.y,'#82ffca',20)}}
+ // breakable debris by pushing fast
+ for(let b of crates)if(!b.broken&&Math.abs(b.vx)>1.8&&b.x>m.length-500){/* kept solid; push mechanic */}
+ // secret room: hold action near hatch for repair
+ let nearSecret=Math.hypot(p.x+17-secret.x,p.y+17-secret.y)<75;
+ if(nearSecret&&!secret.found){secret.found=true;say('СЕКРЕТНАЯ КОМНАТА! Найдено сломанное устройство.');particlesAt(secret.x,secret.y,'#d9a0ff',28)}
+ if(nearSecret&&secret.found&&!secret.fixed&&keys.a){secret.progress++;if(secret.progress%35===0)say('Ремонт устройства…');if(secret.progress>=150){secret.fixed=true;particlesAt(secret.x,secret.y,'#a5ffd7',40);say('Устройство починено! Секрет найден.');hud()}}
+ // boss wakes near
+ if(p.x>boss.x-550&&!boss.dead){boss.active=true;boss.cool--;boss.phase=boss.hp<=boss.max/2?2:1;boss.x+=boss.dir*(boss.phase===2?2.15:1.35);if(boss.x<m.length-430)boss.dir=1;if(boss.x>m.length-110)boss.dir=-1;
+  if(boss.cool<=0){let count=boss.phase===2?3:1;for(let i=0;i<count;i++)shots.push({x:boss.x+35,y:boss.y+40+i*8,vx:(p.x<boss.x?-1:1)*(3+i*.45),life:170,boss:true});boss.cool=boss.phase===2?75:120}
+  if(overlap(p,{x:boss.x,y:boss.y,w:boss.w,h:boss.h})){if(p.vy>1&&p.y+p.h<boss.y+24){boss.hp--;p.vy=-12;shake=8;particlesAt(boss.x+38,boss.y+30,'#ffb36e',25);if(boss.hp<=0){boss.dead=true;say('БОСС ПОБЕЖДЁН! Портал открыт.')} }else hurt()}
+ }
+ if(p.inv>0)p.inv--;
+ for(let q of particles){q.x+=q.vx;q.y+=q.vy;q.vy+=.12;q.life--}particles=particles.filter(q=>q.life>0);
+ camera=Math.max(0,Math.min(m.length-W,p.x-300));
+ if(toastTimer>0){toastTimer--;if(!toastTimer)$('toast').style.opacity=0}
+ if(p.x>exit.x-15){if(!boss.dead){say('Сначала победи босса!');p.x=exit.x-70}else if(starsGot>=m.stars.length){if(level<maps.length-1){level++;loadLevel();say('Новая область открыта!')}else endPanel('МИР СПАСЁН!','Ты прошёл все области, победил боссов и восстановил древний механизм.','СЫГРАТЬ СНОВА')}else{say('Собери все звёзды, чтобы открыть портал!');p.x=exit.x-65}}
+}
+function draw(){
+ let m=maps[level],gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,m.sky[0]);gr.addColorStop(1,m.sky[1]);ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);
+ // distant mountains, clouds, glows
+ for(let i=0;i<18;i++){let xx=((i*190-camera*.22)%1250+1250)%1250;ctx.fillStyle=i%2?'#14274799':'#25395c88';ctx.beginPath();ctx.moveTo(xx-80,470);ctx.lineTo(xx+35,220+(i%4)*35);ctx.lineTo(xx+155,470);ctx.fill()}
+ for(let i=0;i<40;i++){let xx=((i*137-camera*.12)%1000+1000)%1000,yy=(i*61)%270;ctx.fillStyle=`rgba(195,235,255,${.1+(i%4)*.08})`;ctx.beginPath();ctx.arc(xx,yy,1.5+(i%2),0,Math.PI*2);ctx.fill()}
+ ctx.save();ctx.translate(-camera,0);
+ // ground/platforms
+ for(let s of solids()){ctx.fillStyle=s.kind==='bridge'?'#286f75':'#26364e';ctx.fillRect(s.x,s.y,s.w,s.h);ctx.fillStyle=s.kind==='bridge'?'#8bffe0':'#8adff0';ctx.fillRect(s.x,s.y,s.w,5);ctx.fillStyle='#172238';for(let k=12;k<s.w;k+=35)ctx.fillRect(s.x+k,s.y+13,17,4)}
+ // moving lift
+ ctx.fillStyle='#b18cff';ctx.fillRect(mover.x,mover.y,mover.w,mover.h);ctx.fillStyle='#f2d6ff';ctx.fillRect(mover.x,mover.y,mover.w,4);
+ // crates
+ for(let b of crates)if(!b.broken){ctx.fillStyle='#986b43';ctx.fillRect(b.x,b.y,b.w,b.h);ctx.strokeStyle='#f2c17e';ctx.lineWidth=3;ctx.strokeRect(b.x+3,b.y+3,b.w-6,b.h-6);ctx.beginPath();ctx.moveTo(b.x+7,b.y+7);ctx.lineTo(b.x+b.w-7,b.y+b.h-7);ctx.moveTo(b.x+b.w-7,b.y+7);ctx.lineTo(b.x+7,b.y+b.h-7);ctx.stroke()}
+ // button and bridge
+ ctx.fillStyle=buttonOn?'#69ffd0':'#ffca6b';ctx.shadowBlur=buttonOn?20:8;ctx.shadowColor=buttonOn?'#69ffd0':'#ffca6b';ctx.fillRect(m.button.x,m.button.y,m.button.w,m.button.h);ctx.shadowBlur=0;
+ if(!bridgeOn){ctx.fillStyle='#ffca6b';ctx.fillRect(m.button.x+10,m.button.y-9,15,8)}
+ // secret hatch and repair terminal
+ ctx.fillStyle=secret.found?'#633d8d':'#29334d';ctx.fillRect(secret.x-20,secret.y-40,44,55);ctx.strokeStyle='#d5a5ff';ctx.lineWidth=3;ctx.strokeRect(secret.x-20,secret.y-40,44,55);
+ if(secret.found){ctx.fillStyle='#c28bff';ctx.fillRect(secret.x-9,secret.y-26,22,25);ctx.fillStyle='#fff';ctx.fillRect(secret.x-3,secret.y-19,10,3)}
+ if(secret.found&&!secret.fixed){ctx.fillStyle='#fff';ctx.font='bold 13px system-ui';ctx.fillText(`РЕМОНТ ${Math.floor(secret.progress/1.5)}%`,secret.x-30,secret.y-50);ctx.fillStyle='#302446';ctx.fillRect(secret.x-25,secret.y-45,70,5);ctx.fillStyle='#b98aff';ctx.fillRect(secret.x-25,secret.y-45,70*secret.progress/150,5)}
+ if(secret.fixed){ctx.shadowBlur=18;ctx.shadowColor='#79ffc9';ctx.fillStyle='#79ffc9';ctx.fillRect(secret.x-10,secret.y-28,25,25);ctx.shadowBlur=0}
+ // stars
+ for(let o of orbs)if(!o.got){ctx.save();ctx.translate(o.x,o.y+Math.sin(frame/12+o.x)*5);ctx.rotate(frame*.018);ctx.shadowBlur=20;ctx.shadowColor='#ffe78a';ctx.fillStyle='#ffe78a';ctx.beginPath();for(let i=0;i<10;i++){let r=i%2?6:13,a=i*Math.PI/5-Math.PI/2;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r)}ctx.closePath();ctx.fill();ctx.restore()}
+ // enemies
+ for(let e of foes)if(e.alive){ctx.shadowBlur=13;ctx.shadowColor='#ff638c';let eg=ctx.createRadialGradient(e.x+10,e.y+8,2,e.x+17,e.y+15,24);eg.addColorStop(0,'#ffb0c1');eg.addColorStop(1,e.type==='shooter'?'#9c3c91':'#d94c70');ctx.fillStyle=eg;ctx.beginPath();ctx.arc(e.x+17,e.y+15,16,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#fff';ctx.fillRect(e.x+8,e.y+10,5,5);ctx.fillRect(e.x+21,e.y+10,5,5);if(e.type==='shooter'){ctx.fillStyle='#ffe2ef';ctx.fillRect(e.x+10,e.y+24,15,4)}}
+ for(let s of shots){ctx.fillStyle=s.boss?'#ffae70':'#ff719b';ctx.shadowBlur=12;ctx.shadowColor=ctx.fillStyle;ctx.beginPath();ctx.arc(s.x,s.y, s.boss?7:5,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0}
+ // boss
+ if(!boss.dead&&(boss.active||p.x>boss.x-650)){ctx.save();ctx.translate(boss.x+38,boss.y+38);let pulse=1+Math.sin(frame/8)*.04;ctx.scale(pulse,pulse);let bg=ctx.createRadialGradient(-15,-20,4,0,0,50);bg.addColorStop(0,'#ffe0b0');bg.addColorStop(.45,'#ff995e');bg.addColorStop(1,'#a83254');ctx.fillStyle=bg;ctx.shadowBlur=25;ctx.shadowColor='#ff784f';ctx.beginPath();ctx.arc(0,0,38,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#31152b';ctx.fillRect(-18,-10,9,9);ctx.fillRect(10,-10,9,9);ctx.restore();ctx.fillStyle='#301526';ctx.fillRect(boss.x-5,boss.y-15,86,8);ctx.fillStyle='#ff687b';ctx.fillRect(boss.x-5,boss.y-15,86*boss.hp/boss.max,8);ctx.fillStyle='#fff';ctx.font='bold 13px system-ui';ctx.fillText('СТРАЖ ЯДРА',boss.x-5,boss.y-22)}
+ // exit portal
+ ctx.shadowBlur=24;ctx.shadowColor=boss.dead?'#7affd4':'#6a7795';ctx.strokeStyle=boss.dead?'#9bffe0':'#66728c';ctx.lineWidth=7;ctx.beginPath();ctx.ellipse(exit.x,430,22,48,0,0,Math.PI*2);ctx.stroke();ctx.shadowBlur=0;
+ // player cube with rolling rotation
+ ctx.save();ctx.translate(p.x+17,p.y+17);ctx.rotate(p.rot);ctx.shadowBlur=20;ctx.shadowColor='#8cecff';let pg=ctx.createLinearGradient(-17,-17,17,17);pg.addColorStop(0,'#536b86');pg.addColorStop(.45,'#101b2d');pg.addColorStop(1,'#02050a');ctx.fillStyle=pg;ctx.fillRect(-17,-17,34,34);ctx.strokeStyle='#c2f5ff';ctx.lineWidth=2;ctx.strokeRect(-16,-16,32,32);ctx.shadowBlur=0;ctx.fillStyle='#efffff';ctx.fillRect(-9,-4,5,5);ctx.fillRect(5,-4,5,5);ctx.fillStyle='#6eeaff';ctx.fillRect(-5,8,10,2);ctx.restore();
+ // particles
+ for(let q of particles){ctx.globalAlpha=Math.max(0,q.life/35);ctx.fillStyle=q.color;ctx.fillRect(q.x,q.y,q.size,q.size)}ctx.globalAlpha=1;
+ ctx.restore();
+ // boss bar cue and action hint
+ if(secret.found&&!secret.fixed&&Math.hypot(p.x+17-secret.x,p.y+17-secret.y)<100){ctx.fillStyle='#fff';ctx.font='bold 14px system-ui';ctx.fillText('УДЕРЖИВАЙ «ДЕЙСТВИЕ», ЧТОБЫ ЧИНИТЬ',W/2-170,105)}
+}
+function loop(){if(!started)return;update();draw();if(shake>0)shake--;requestAnimationFrame(loop)}
+function bind(id,key){let el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();keys[key]=true;el.setPointerCapture(e.pointerId)});['pointerup','pointercancel','lostpointercapture'].forEach(t=>el.addEventListener(t,()=>keys[key]=false))}
+bind('L','l');bind('R','r');bind('J','j');bind('A','a');
+onkeydown=e=>{if(['ArrowLeft','a','A'].includes(e.key))keys.l=true;if(['ArrowRight','d','D'].includes(e.key))keys.r=true;if([' ','ArrowUp','w','W'].includes(e.key))keys.j=true;if(['e','E'].includes(e.key))keys.a=true};
+onkeyup=e=>{if(['ArrowLeft','a','A'].includes(e.key))keys.l=false;if(['ArrowRight','d','D'].includes(e.key))keys.r=false;if([' ','ArrowUp','w','W'].includes(e.key))keys.j=false;if(['e','E'].includes(e.key))keys.a=false};
+$('start').onclick=()=>{$('overlay').style.display='none';started=true;loop()};
+loadLevel();draw();
+})();
+</script></body></html>
